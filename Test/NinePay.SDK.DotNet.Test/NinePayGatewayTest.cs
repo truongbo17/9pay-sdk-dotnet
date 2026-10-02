@@ -1,3 +1,6 @@
+using System.Net;
+using System.Net.Sockets;
+using System.Text;
 using Xunit;
 using NinePay.SDK.DotNet.Config;
 using NinePay.SDK.DotNet.Gateway;
@@ -31,19 +34,39 @@ namespace NinePay.SDK.DotNet.Test
             Assert.Contains("signature=", redirectUrl);
         }
 
-        // ================= REFUND TEST =================
-        [Fact]
-        public void TestRefund()
+        [Theory]
+        [InlineData("true", true)]
+        [InlineData("false", false)]
+        [InlineData("\"true\"", true)]
+        [InlineData("1", false)]
+        public async System.Threading.Tasks.Task RefundReadsSuccessFromJson(string successJson, bool expectedSuccess)
         {
-            var refundRequest = new ReverseRequest(
-                requestId: "REFUND_" + System.DateTime.Now.Ticks,
-                orderCode: "INV123"
-            );
+            var portProbe = new TcpListener(IPAddress.Loopback, 0);
+            portProbe.Start();
+            var port = ((IPEndPoint)portProbe.LocalEndpoint).Port;
+            portProbe.Stop();
 
-            ResponseInterface response = gateway.Refund(refundRequest);
+            using var listener = new HttpListener();
+            listener.Prefixes.Add($"http://127.0.0.1:{port}/");
+            listener.Start();
 
-            Assert.NotNull(response);
-            Assert.NotNull(response.GetMessage());
+            var serverTask = System.Threading.Tasks.Task.Run(async () =>
+            {
+                var context = await listener.GetContextAsync();
+                var body = Encoding.UTF8.GetBytes($"{{\"success\":{successJson},\"message\":\"OK\"}}");
+                context.Response.ContentType = "application/json";
+                context.Response.ContentLength64 = body.Length;
+                await context.Response.OutputStream.WriteAsync(body);
+                context.Response.Close();
+            });
+
+            var localGateway = new NinePayGateway(
+                new NinePayConfig("MID", "SECRET", "CHECKSUM", $"http://127.0.0.1:{port}"));
+            var response = localGateway.Refund(new ReverseRequest("REFUND_123", "INV123"));
+            await serverTask;
+
+            Assert.Equal(expectedSuccess, response.IsSuccess());
+            Assert.Equal("OK", response.GetMessage());
         }
     }
 }

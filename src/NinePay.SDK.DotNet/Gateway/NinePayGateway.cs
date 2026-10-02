@@ -190,7 +190,10 @@ namespace NinePay.SDK.DotNet.Gateway
             var data = JsonSerializer.Deserialize<Dictionary<string, object>>(response)
                        ?? new Dictionary<string, object>();
 
-            bool success = data.ContainsKey("success") && data["success"]?.ToString() == "true";
+            bool success = data.TryGetValue("success", out var successValue)
+                && successValue is JsonElement successElement
+                && (successElement.ValueKind == JsonValueKind.True
+                    || (successElement.ValueKind == JsonValueKind.String && successElement.GetString() == "true"));
 
             string message = data.ContainsKey("message")
                 ? data["message"]?.ToString() ?? ""
